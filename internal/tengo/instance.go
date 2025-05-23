@@ -110,6 +110,11 @@ func (instance *Instance) BuildParamString(params string) string {
 		v.Set(name, overrides.Get(name))
 	}
 
+	if instance.flavor.Variants == VariantTiDB {
+		// TiDB does not support setting sql_log_bin=0, so remove it if present
+		v.Del("sql_log_bin")
+	}
+
 	// If a readTimeout is being set, make the lock wait timeouts be less than the
 	// readTimeout. This ensures queries/statements will hit lock wait timeouts
 	// *before* hitting the readTimeout, aiding in troubleshooting lock-related
@@ -455,23 +460,32 @@ func (instance *Instance) Schemas(onlyNames ...string) ([]*Schema, error) {
 	var args []interface{}
 	var query string
 
+	// If instance is using lower_case_table_names=2, apply an explicit collation
+	// to ensure the schema name comes back with its original lettercasing. See
+	// https://dev.mysql.com/doc/refman/8.0/en/charset-collation-information-schema.html
+	var lctn2Collation string
+	flavor := instance.Flavor()
+	if instance.NameCaseMode() == NameCaseInsensitive {
+		if flavor.HasVariant(VariantTiDB) {
+			// TiDB has 4-byte UTF-8 schema names
+			lctn2Collation = " COLLATE utf8mb4_general_ci"
+		} else {
+			// MySQL 8.0 has 3-byte UTF-8 schema names
+			lctn2Collation = " COLLATE utf8_general_ci"
+		}
+	}
+
 	// Note on these queries: MySQL 8.0 changes information_schema column names to
 	// come back from queries in all caps, so we need to explicitly use AS clauses
 	// in order to get them back as lowercase and have sqlx Select() work
 	if len(onlyNames) == 0 {
-		query = `
+		query = fmt.Sprintf(`
 			SELECT schema_name AS schema_name, default_character_set_name AS default_character_set_name,
 			       default_collation_name AS default_collation_name
 			FROM   information_schema.schemata
-			WHERE  schema_name NOT IN ('information_schema', 'performance_schema', 'mysql', 'test', 'sys')`
+			WHERE  schema_name%s NOT IN ('information_schema', 'performance_schema', 'mysql', 'test', 'sys')`,
+			lctn2Collation)
 	} else {
-		// If instance is using lower_case_table_names=2, apply an explicit collation
-		// to ensure the schema name comes back with its original lettercasing. See
-		// https://dev.mysql.com/doc/refman/8.0/en/charset-collation-information-schema.html
-		var lctn2Collation string
-		if instance.NameCaseMode() == NameCaseInsensitive {
-			lctn2Collation = " COLLATE utf8_general_ci"
-		}
 		query = fmt.Sprintf(`
 			SELECT schema_name AS schema_name, default_character_set_name AS default_character_set_name,
 			       default_collation_name AS default_collation_name
@@ -495,7 +509,6 @@ func (instance *Instance) Schemas(onlyNames ...string) ([]*Schema, error) {
 		// connections, so we will explicitly close the pool afterwards, to avoid
 		// keeping a very large number of conns open. (Although idle conns eventually
 		// get closed automatically, this may take too long.)
-		flavor := instance.Flavor()
 		schemaDB, err := instance.ConnectionPool(rawSchema.Name, instance.introspectionParams())
 		if err != nil {
 			return nil, err
@@ -1108,4 +1121,19 @@ func (instance *Instance) ProcessList() (plist []ServerProcess, err error) {
 		plist = append(plist, sp)
 	}
 	return
+}
+
+// IsSystemSchema returns true if name is a system schema
+func (instance *Instance) IsSystemSchema(name string) bool {
+	systemSchemas := map[string]bool{
+		"mysql":              true,
+		"information_schema": true,
+		"performance_schema": true,
+		"sys":                true,
+	}
+	flavor := instance.Flavor()
+	if flavor.HasVariant(VariantTiDB) {
+		systemSchemas["metrics_schema"] = true
+	}
+	return systemSchemas[strings.ToLower(name)]
 }

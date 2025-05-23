@@ -283,7 +283,7 @@ func queryColumnsInSchema(ctx context.Context, db *sqlx.DB, schema string, flavo
 	if flavor.GeneratedColumns() {
 		genExpr = "generation_expression"
 	}
-	if flavor.MinMySQL(8) {
+	if flavor.MinMySQL(8) && flavor.Variants != VariantTiDB {
 		srid = "srs_id"
 	}
 	// Note: we could get MariaDB SRIDs from information_schema.geometry_columns.srid
