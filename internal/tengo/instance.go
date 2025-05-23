@@ -470,7 +470,12 @@ func (instance *Instance) Schemas(onlyNames ...string) ([]*Schema, error) {
 		// https://dev.mysql.com/doc/refman/8.0/en/charset-collation-information-schema.html
 		var lctn2Collation string
 		if instance.NameCaseMode() == NameCaseInsensitive {
-			lctn2Collation = " COLLATE utf8_general_ci"
+			// Use a utf8mb4-compatible collation for case-insensitive comparison,
+			// as the connection charset is likely utf8mb4, especially with TiDB
+			// or modern MySQL versions when lower_case_table_names=2.
+			// utf8_general_ci is for utf8/utf8mb3 and causes errors if the
+			// connection/column context is utf8mb4.
+			lctn2Collation = " COLLATE utf8mb4_general_ci"
 		}
 		query = fmt.Sprintf(`
 			SELECT schema_name AS schema_name, default_character_set_name AS default_character_set_name,
