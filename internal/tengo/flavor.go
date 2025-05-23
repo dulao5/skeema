@@ -174,6 +174,7 @@ type Variant uint32
 const (
 	VariantPercona Variant = 1 << iota
 	VariantAurora
+	VariantTiDB
 )
 
 // Variant zero value constants can either express no variant or unknown variants.
@@ -190,6 +191,9 @@ func (variant Variant) String() string {
 	}
 	if variant&VariantAurora != 0 {
 		ss = append(ss, "aurora")
+	}
+	if variant&VariantTiDB != 0 {
+		ss = append(ss, "tidb")
 	}
 	return strings.Join(ss, "-")
 }
@@ -261,6 +265,9 @@ func IdentifyFlavor(versionString, versionComment string) (flavor Flavor) {
 	if strings.Contains(versionComment, "percona") || strings.Contains(versionString, "percona") {
 		flavor.Vendor = VendorMySQL
 		flavor.Variants = VariantPercona
+	} else if strings.Contains(versionComment, "tidb") || strings.Contains(versionString, "tidb") {
+		flavor.Vendor = VendorMySQL
+		flavor.Variants = VariantTiDB
 	} else {
 		for _, attempt := range []Vendor{VendorMariaDB, VendorMySQL} {
 			if vs := attempt.String(); strings.Contains(versionComment, vs) || strings.Contains(versionString, vs) {
